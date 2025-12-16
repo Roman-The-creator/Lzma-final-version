@@ -39,19 +39,19 @@ class ArchiveHeader:
     @staticmethod
     def deserialize(data: bytes) -> 'ArchiveHeader':
         if len(data) < 16:
-            raise ValueError("Invalid archive header")
+            raise ValueError("Некорректный заголовок архива")
         
         header = ArchiveHeader()
         pos = 0
         
         magic = data[pos:pos+4]
         if magic != ARCHIVE_MAGIC:
-            raise ValueError("Invalid archive magic")
+            raise ValueError("Неверная сигнатура архива")
         pos += 4
         
         version = data[pos]
         if version != ARCHIVE_VERSION:
-            raise ValueError(f"Unsupported version: {version}")
+            raise ValueError(f"Неподдерживаемая версия: {version}")
         pos += 1
         
         pos += 1
@@ -91,14 +91,14 @@ class ArchiveFormat:
         pos = 0
         
         if len(data) < 16:
-            raise ValueError("Archive too small")
+            raise ValueError("Слишком малый размер данных архива")
         
         header_data = data[pos:pos+16]
         ArchiveHeader.deserialize(header_data)
         pos += 16
         
         if pos + 4 > len(data):
-            raise ValueError("Invalid archive structure")
+            raise ValueError("Неверная структура архива")
         
         entry_count = struct.unpack('I', data[pos:pos+4])[0]
         pos += 4
@@ -114,19 +114,19 @@ class ArchiveFormat:
     @staticmethod
     def _read_entry(data: bytes, pos: int) -> tuple:
         if pos + 2 > len(data):
-            raise ValueError("Corrupted entry: cannot read filename length")
+            raise ValueError("Поврежденная запись: не удалось прочитать длину имени файла")
         
         filename_len = struct.unpack('H', data[pos:pos+2])[0]
         pos += 2
         
         if pos + filename_len > len(data):
-            raise ValueError("Corrupted entry: cannot read filename")
+            raise ValueError("Поврежденная запись: не удалось прочитать имя файла")
         
         filename = data[pos:pos+filename_len].decode('utf-8')
         pos += filename_len
         
         if pos + 16 > len(data):
-            raise ValueError("Corrupted entry: cannot read metadata")
+            raise ValueError("Поврежденная запись: не удалось прочитать метаданные")
         
         original_size = struct.unpack('Q', data[pos:pos+8])[0]
         pos += 8
@@ -136,7 +136,7 @@ class ArchiveFormat:
         pos += 4
         
         if pos + compressed_size > len(data):
-            raise ValueError("Corrupted entry: cannot read compressed data")
+            raise ValueError("Поврежденная запись: не удалось прочитать сжатые данные")
         
         compressed_data = data[pos:pos+compressed_size]
         pos += compressed_size
