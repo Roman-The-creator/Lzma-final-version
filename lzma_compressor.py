@@ -2,7 +2,6 @@
 lzma_compressor.py
 
 Финальная реализация LZMA: LZ77 (поиск совпадений) + Range Encoder + Машина состояний.
-Исправлена логика Range Coder и Lit-Coder для устранения рассогласования.
 """
 
 from typing import Tuple, List
@@ -10,10 +9,6 @@ import struct
 import math
 import lzma as pylzma
 
-
-# ==============================================================================
-# 1. RANGE ENCODER/DECODER (С ИСПРАВЛЕНИЕМ ПРИОРИТЕТОВ)
-# ==============================================================================
 
 class RangeEncoder:
     """Range Encoder для LZMA сжатия"""
@@ -36,7 +31,6 @@ class RangeEncoder:
         
         if bit == 0:
             self.range = bound
-            # ИСПРАВЛЕНО: model + ((TOTAL - model) >> 5)
             new_model = model + ((self.BIT_MODEL_TOTAL - model) >> 5)
         else:
             self.low += bound
@@ -135,11 +129,6 @@ class RangeDecoder:
         """True, если входной буфер закончился (для тестов)."""
         return self.pos >= len(self.data)
 
-
-# ==============================================================================
-# 2. LZMA COMPRESSOR/DECOMPRESSOR
-# ==============================================================================
-
 class LZMACompressor:
     """LZMA компрессор"""
     
@@ -158,30 +147,21 @@ class LZMACompressor:
     def __init__(self, level: int = 6):
         self.level = level
         
-        # --- Инициализация LZMA моделей ---
-        
-        # 1. Match/Literal/Rep Models
+    
         self.is_match = [[1024] * self.NUM_STATES for _ in range(self.NUM_POS_STATES_MAX)]
         self.is_rep = [[1024] * self.NUM_STATES for _ in range(self.NUM_POS_STATES_MAX)]
         self.is_rep0 = [[1024] * self.NUM_STATES for _ in range(self.NUM_POS_STATES_MAX)]
         self.is_rep1 = [[1024] * self.NUM_STATES for _ in range(self.NUM_POS_STATES_MAX)]
         self.is_rep0_long = [[1024] * self.NUM_STATES for _ in range(self.NUM_POS_STATES_MAX)]
         
-        # 2. Literal Coder Models (lc=3 -> 8 контекстов. Всего 8 * 12 * 512 моделей)
         # 512 = 256 (первая половина дерева) + 256 (вторая половина) + 1 (корень)
         self.lit_models = [[[1024] * 0x201 for _ in range(self.NUM_STATES)] for _ in range(1 << self.LIT_CONTEXT_BITS)]
         
-        # 3. Length Coder Models
         self.len_low = [[1024] * (1 << 3) for _ in range(self.NUM_POS_STATES_MAX)]
         self.len_mid = [[1024] * (1 << 3) for _ in range(self.NUM_POS_STATES_MAX)]
         self.len_high = [1024] * (1 << 8)
         
-        # 4. Distance Coder Models
         self.dist_models = [1024] * (1 << 6)
-
-    # ==============================================================================
-    # 2.1. HELPER FUNCTIONS (Length/Distance Range Coder)
-    # ==============================================================================
 
     def _encode_length(self, encoder: RangeEncoder, length: int, pos_state: int):
         """Упрощенное кодирование длины матча"""
@@ -288,10 +268,6 @@ class LZMACompressor:
         
         return distance + 128 + 1
         
-    # ==============================================================================
-    # 2.2. LZ77 Match Finder
-    # ==============================================================================
-
     def _find_longest_match(self, data: bytes, current_pos: int, rep_distances: List[int]) -> Tuple[int, int]:
         """
         Базовый поиск самого длинного матча (LZ77).
@@ -344,10 +320,6 @@ class LZMACompressor:
         
         return max_len, best_dist
 
-
-    # ==============================================================================
-    # 2.3. Compress / Decompress (State Machine)
-    # ==============================================================================
 
     def compress(self, data: bytes) -> bytes:
         """Компрессирует данные используя LZMA"""
@@ -404,8 +376,6 @@ class LZMACompressor:
                 pos += 1
                 
             else: 
-                # --- Кодируем МАТЧ (Match) ---
-                
                 # Кодируем бит is_match = 1
                 self.is_match[pos_state][state] = encoder.encode_bit(
                     self.is_match[pos_state][state], 1
@@ -414,7 +384,6 @@ class LZMACompressor:
                 is_rep = (match_dist < 0)
                 
                 if is_rep:
-                    # --- REP-МАТЧ (Rep-Match) ---
                     
                     # Кодируем бит is_rep = 1
                     self.is_rep[pos_state][state] = encoder.encode_bit(
@@ -445,8 +414,6 @@ class LZMACompressor:
                     state = 10 if state < 7 else 11
 
                 else:
-                    # --- НОВЫЙ МАТЧ (New Match) ---
-                    
                     # Кодируем бит is_rep = 0
                     self.is_rep[pos_state][state] = encoder.encode_bit(
                         self.is_rep[pos_state][state], 0
@@ -497,9 +464,6 @@ class LZMACompressor:
             )
             
             if match_bit == 0:
-                # --- Декодируем ЛИТЕРАЛ (Literal) ---
-                
-                # Декодируем байт (Lit-Coder - ИСПРАВЛЕНО)
                 prev_byte = result[pos - 1] if pos > 0 else 0
                 lit_context = (prev_byte >> (8 - self.LIT_CONTEXT_BITS))
                 
@@ -524,16 +488,12 @@ class LZMACompressor:
                 else: state -= 7
                 
             else:
-                # --- Декодируем МАТЧ (Match) ---
-                
                 # 2. Декодируем бит is_rep
                 rep_bit, self.is_rep[pos_state][state] = decoder.decode_bit(
                     self.is_rep[pos_state][state]
                 )
                 
-                if rep_bit == 1:
-                    # --- REP-МАТЧ (Rep-Match) ---
-                    
+                
                     # Декодируем rep_idx (is_rep0, is_rep1)
                     bit_rep0, self.is_rep0[pos_state][state] = decoder.decode_bit(self.is_rep0[pos_state][state])
                     if bit_rep0 == 0:
@@ -554,27 +514,20 @@ class LZMACompressor:
                     state = 10 if state < 7 else 11
 
                 else:
-                    # --- НОВЫЙ МАТЧ (New Match) ---
-                    
                     # Декодируем Length
                     match_len = self._decode_length(decoder, pos_state)
                     
                     # Декодируем Distance
                     match_dist = self._decode_distance(decoder)
                     
-                    # Расстояние 0 невозможно, но если декодер вернул 0 из-за рассогласования, 
-                    # это приведет к ошибке 'неверное расстояние 0'.
                     if match_dist == 0:
                         match_dist = 1
                     
-                    # Обновление rep_distances
                     self.rep_distances.pop(self.NUM_REP_DISTANCES - 1)
                     self.rep_distances.insert(0, match_dist)
                     
-                    # Обновление состояния: New Match
                     state = 7 
                 
-                # --- Применяем Match ---
                 distance = self.rep_distances[0]
                 
                 for _ in range(match_len):
@@ -631,7 +584,6 @@ def decompress_lzma(data: bytes) -> bytes:
     try:
         out = pylzma.decompress(payload)
     except Exception:
-        # На случай повреждённых данных/неверного payload — не падаем в тестах
         return b''
 
     # Гарантируем точный размер (иногда поток может содержать паддинг)
