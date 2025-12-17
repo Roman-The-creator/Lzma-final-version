@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.lzma
+file1.txt
+file2.txt
+file3.txt
+file4.txt
+temp_test_*/
+.vscode/
+.idea/
+
